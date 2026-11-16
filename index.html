@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>vcellx · 表观先验到底有没有用</title>
+<meta name="description" content="两个虚拟细胞模型共用同一骨干，只改变表观信号进入模型的方式：一条沿基因调控网络传播，一条直接编码。用度匹配打乱的拓扑做对照，把「图拓扑有用」和「只是看到更多基因」分开测量。">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+<a class="skip" href="#main">跳到正文</a>
+
+<header class="masthead">
+  <canvas id="heroNet" aria-hidden="true"></canvas>
+  <div class="wrap">
+    <p class="eyebrow">vcellx / virtual cell</p>
+    <h1>表观遗传先验，<em>到底有没有用</em></h1>
+    <p class="lede">
+      单细胞扰动数据能告诉你「敲掉某个基因之后细胞怎么变」。但如果想预测<strong>没做过的</strong>组合，
+      一个自然的想法是引入表观遗传的先验知识 —— 染色质可及性、转录因子结合、染色质接触。
+      问题是：<strong>这些先验真的带来信息，还是只是让模型看到了更多特征？</strong>
+      这一页讲我怎么把这两个解释分开测量。
+    </p>
+
+    <div class="status">
+      <b>研究状态</b>
+      原型，结果未完成。预训练编码器正在训练，三臂扰动模型与 <code>cell-eval2</code> 评测尚未运行。
+      <strong>本页不包含任何未真实跑出的性能数字</strong>，结果表的对应格子会留空直到实验完成。
+    </div>
+
+    <dl class="facts">
+      <div class="fact"><dt>训练细胞</dt><dd>221,273 <span>Arc VCC</span></dd></div>
+      <div class="fact"><dt>靶基因切分</dt><dd>98 / 22 / 30 <span>不相交</span></dd></div>
+      <div class="fact"><dt>预训练语料</dt><dd>1,136,218 <span>细胞</span></dd></div>
+      <div class="fact"><dt>基因面板</dt><dd>4,096 <span>共享</span></dd></div>
+      <div class="fact"><dt>GRN 边</dt><dd>K562 <span>Hi-C 环</span></dd></div>
+      <div class="fact"><dt>实验臂</dt><dd>3 <span>graph/shuffle/direct</span></dd></div>
+    </dl>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ======================================================== 00 -->
+<section aria-labelledby="s0">
+  <div class="col">
+    <div class="sec-head" data-reveal>
+      <span class="sec-num">00 / 问题</span>
+      <h2>为什么之前的比较说不清</h2>
+    </div>
+    <div class="prose" data-reveal>
+      <p>
+        文献里「表观先验是否有帮助」两种结论都有。多数比较把三件不同的事混在一起测，
+        所以结论互相矛盾，也说不清到底哪一环起了作用。
+      </p>
+    </div>
+
+    <ul class="terms" data-reveal>
+      <li><span class="k">① 拓扑信息</span><span class="v">图的<strong>连接方式</strong>是否携带调控信息。这是我们想证明的。</span></li>
+      <li><span class="k">② 信息量</span><span class="v">图传播天然让模型看到<strong>邻居基因</strong>的特征。赢了可能只是输入更多。</span></li>
+      <li><span class="k">③ 过拟合</span><span class="v">模型可能记住了训练集里的靶基因响应，换一个靶基因就失效。</span></li>
+    </ul>
+
+    <div class="prose" data-reveal style="margin-top:26px">
+      <p>
+        如果只拿「有图」和「没图」比，① 和 ② 就分不开 —— 有图那一侧输入维度天然更大。
+        所以我的设计里必须有第三个臂：它<strong>看到同样多的信息</strong>，但<strong>拓扑是随机的</strong>。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================== 01 -->
+<section aria-labelledby="s1">
+  <div class="col">
+    <div class="sec-head" data-reveal>
+      <span class="sec-num">01 / 数据</span>
+      <h2>先把数据本身核验清楚</h2>
+      <p>
+        在谈模型之前，数据是否完整本身就是个问题。Hugging Face 的文件树接口<strong>会分页</strong>，
+        只看第一页会严重低估文件数 —— 我第一次查 Tahoe-100M 只返回 993 个文件，
+        实际有 4,427 个。所以核验必须逐文件比对字节数。
+      </p>
+    </div>
+
+    <div class="col-wide" data-reveal style="padding:0">
+      <div class="tblwrap">
+        <table>
+          <caption>数据完整性核验（2026-11-16，逐文件字节比对）</caption>
+          <thead>
+            <tr>
+              <th scope="col">数据集</th>
+              <th scope="col" class="num">期望</th>
+              <th scope="col" class="num">一致</th>
+              <th scope="col">核验方式</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Arc VCC 训练集</td>
+              <td class="num">5 files / 15.48 GB</td>
+              <td class="num">5 / 5</td>
+              <td>逐文件字节比对</td>
+            </tr>
+            <tr>
+              <td>Tahoe-100M</td>
+              <td class="num">4,427 files / 428.81 GB</td>
+              <td class="num">4,427 / 4,427</td>
+              <td>逐文件字节比对</td>
+            </tr>
+            <tr>
+              <td>X-Atlas-Orion</td>
+              <td class="num">337 files / 126.26 GB</td>
+              <td class="num">337 / 337</td>
+              <td>逐文件字节比对</td>
+            </tr>
+            <tr>
+              <td>Tabula Sapiens v2（cellxgene）</td>
+              <td class="num">45.01 GB</td>
+              <td class="num">sha256 一致</td>
+              <td>重算 45 GB 哈希</td>
+            </tr>
+            <tr>
+              <td>Tabula Sapiens v2（figshare 28 文件）</td>
+              <td class="num">57.14 GB</td>
+              <td class="num pending">未下载</td>
+              <td>与上一行内容重叠</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="prose" data-reveal style="margin-top:26px">
+      <p>
+        基因轴也要对齐。四个数据源用的标识不同（Tabula 用 Ensembl，Arc 用基因符号），
+        核验结果：
+      </p>
+    </div>
+
+    <div class="eq" data-reveal>
+Arc ∩ Tabula <span class="n">17,635 (97.5%)</span>
+Arc ∩ Orion  <span class="n">17,701 (97.9%)</span>
+Arc ∩ Tahoe  <span class="n">17,741 (98.1%)</span>
+    </div>
+
+    <div class="prose" data-reveal>
+      <p>
+        所以预训练面板取 <strong>4,096 个基因</strong>，全部同时存在于 Arc 与 Tabula。
+        面板按<strong>外部数据</strong>的方差选择，不看 Arc 的扰动细胞 —— 否则特征选择就把要预测的东西泄漏了。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================== 02 -->
+<section aria-labelledby="s2">
+  <div class="col">
+    <div class="sec-head" data-reveal>
+      <span class="sec-num">02 / 设计</span>
+      <h2>同一骨干，三个臂，只改一个变量</h2>
+    </div>
+    <div class="prose" data-reveal>
+      <p>
+        三个臂的编码器、解码器、逐靶基因嵌入、优化器、步数、数据<strong>完全相同</strong>。
+        唯一变化的是条件向量里那一项表观通路。
+      </p>
+    </div>
+
+    <div class="eq" data-reveal>
+      <span class="n">共享:</span>  z<sub>p</sub> = emb[p] + epi_pathway(p)
+    </div>
+
+    <div class="arms" data-reveal>
+      <div class="arm arm--g">
+        <span class="arm__tag">graph · 紫罗兰</span>
+        <div class="formula">W · (A e)<sub>p</sub></div>
+        <p>表观特征沿 GRN 扩散一步再取靶基因那一行。邻居的调控信息被聚合进来。</p>
+      </div>
+      <div class="arm arm--s">
+        <span class="arm__tag">shuffle · 石板灰</span>
+        <div class="formula">W · (A<sub>shuf</sub> e)<sub>p</sub></div>
+        <p><strong>度分布完全相同，拓扑随机打乱。</strong>看到的信息量与 graph 一样多，只有连接方式不同。</p>
+      </div>
+      <div class="arm arm--d">
+        <span class="arm__tag">direct · 琥珀</span>
+        <div class="formula">W · e<sub>p</sub></div>
+        <p>只用靶基因自己的表观特征，完全没有图。</p>
+      </div>
+    </div>
+
+    <div class="prose" data-reveal style="margin-top:26px">
+      <p>
+        没有 <span class="mono" style="color:var(--shuffle)">shuffle</span> 这一臂，
+        <span class="mono" style="color:var(--graph)">graph</span> 胜过
+        <span class="mono" style="color:var(--direct)">direct</span> 是<strong>无法解释的</strong> ——
+        它可能只是输入更大。打乱臂把「看到多少」固定住，只让「谁连谁」变化。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================== 03 -->
+<section aria-labelledby="s3">
+  <div class="col">
+    <div class="sec-head" data-reveal>
+      <span class="sec-num">03 / 图的构造</span>
+      <h2>GRN 从染色质接触来，不看表达</h2>
+    </div>
+    <div class="prose" data-reveal>
+      <p>
+        构造规则刻意简单、可审计：拿 K562 的 in-situ Hi-C 环文件，如果一个环的两个锚点
+        分别落在基因 A 和基因 B 的启动子窗口（TSS ± 1 kb）内，就加一条边，权重用该环的
+        <span class="mono">observed</span> 计数。每节点保留 top-10 边后对称化。
+      </p>
+      <p>
+        <strong>建图过程不看表达数据，也不看留出靶基因的响应。</strong>启动子坐标来自 GENCODE v44。
+      </p>
+      <p>
+        下面的图可以点。它画出靶基因的一跳邻域，以及
+        <span class="mono" style="color:var(--graph)">graph</span> 臂实际聚合到的信息。
+        切到打乱模式，你会看到同一个节点<strong>邻居数量不变</strong>，但连的对象换了。
+      </p>
+    </div>
+
+    <div class="fig" data-reveal>
+      <div class="fig__frame">
+        <h4>图 1 · 一跳邻域与度匹配打乱</h4>
+        <canvas id="graphField" class="field" aria-label="基因调控网络的局部邻域，可以点击不同靶基因查看它的一跳邻居，并切换真实拓扑与度匹配打乱拓扑"></canvas>
+        <div class="ctl-row">
+          <div class="seg" role="group" aria-label="拓扑模式">
+            <button class="btn" id="topoReal" aria-pressed="true">真实 Hi-C 拓扑</button>
+            <button class="btn" id="topoShuf" aria-pressed="false">度匹配打乱</button>
+          </div>
+          <div class="ctl-item">
+            <label for="gNeighbor">节点数</label>
+            <input type="range" id="gNeighbor" min="10" max="22" step="1" value="16">
+            <span class="val" id="gNeighborVal">16</span>
+          </div>
+        </div>
+        <dl class="readout">
+          <div><dt>靶基因</dt><dd id="gTarget">—</dd></div>
+          <div><dt>度</dt><dd id="gDeg">—</dd></div>
+          <div><dt>边数</dt><dd id="gEdges">—</dd></div>
+        </dl>
+      </div>
+      <figcaption>
+        <b>示意图，但拓扑操作是真的。</b>
+        节点位置和名称是为了可读性构造的，边的权重量级取自 Hi-C 环的 observed 分布。
+        打乱用的是受约束换边：每次交换两个节点的目标，若不产生重复边才接受，
+        因此<strong>每个节点的度精确不变</strong>。这正是实验里隔离「拓扑」与「信息量」的做法。
+      </figcaption>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================== 04 -->
+<section aria-labelledby="s4">
+  <div class="col">
+    <div class="sec-head" data-reveal>
+      <span class="sec-num">04 / 预训练</span>
+      <h2>先学一个细胞表示，再接表观通路</h2>
+    </div>
+    <div class="prose" data-reveal>
+      <p>
+        扰动模型之前先训练一个细胞编码器。做法是掩码表达建模：
+        每个细胞随机遮住 30% 的基因，用剩下的 70% 编码成单个向量，然后
+        <strong>只从该向量重建被遮住的位置</strong>。
+      </p>
+      <p>
+        「只重建被遮住的位置」是关键。如果对全部位置算重建损失，恒等映射就能把损失压得很低，
+        编码器什么也学不到。
+      </p>
+    </div>
+
+    <div class="fig" data-reveal>
+      <div class="fig__frame">
+        <h4>图 2 · 掩码与重建</h4>
+        <canvas id="maskField" class="field" aria-label="一条基因表达向量，被随机遮住三成，模型只重建被遮住的位置"></canvas>
+        <div class="ctl-row">
+          <div class="ctl-item">
+            <label for="maskFrac">掩码比例</label>
+            <input type="range" id="maskFrac" min="10" max="70" step="5" value="30">
+            <span class="val" id="maskFracVal">0.30</span>
+          </div>
+          <button class="btn" id="maskResample">重新采样</button>
+        </div>
+        <dl class="readout">
+          <div><dt>面板基因</dt><dd>4,096</dd></div>
+          <div><dt>被遮住</dt><dd id="maskCount">1,229</dd></div>
+          <div><dt>潜在维度</dt><dd>256</dd></div>
+        </dl>
+      </div>
+      <figcaption>
+        <b>数值为示意，掩码逻辑是真的。</b>
+        真实面板是 4,096 个基因（按外部数据方差选出，全部存在于 Arc 与 Tabula），
+        编码器 3.41 M 参数。目前已观测到的掩码重建损失：<span class="mono">0.680 → 0.582（第 1–5 epoch）</span>。
+      </figcaption>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================== 05 -->
+<section aria-labelledby="s5">
+  <div class="col">
+    <div class="sec-head" data-reveal>
+      <span class="sec-num">05 / 损失</span>
+      <h2>为什么比的是分布，不是细胞</h2>
+    </div>
+    <div class="prose" data-reveal>
+      <p>
+        单细胞测序是破坏性的。扰动前的状态和扰动后的状态<strong>不可能来自同一个细胞</strong>，
+        所以逐细胞配对在原理上不成立。模型因此比较两个<strong>细胞集合的分布</strong>，
+        用最大均值差异（MMD，能量距离核）。
+      </p>
+    </div>
+
+    <div class="eq" data-reveal>
+      MMD² = 2·E‖x−y‖ <span class="n">−</span> E‖x−x′‖ <span class="n">−</span> E‖y−y′‖
+    </div>
+
+    <div class="prose" data-reveal>
+      <p>
+        三项分别是跨集相似度、预测集内部相似度、观测集内部相似度。两个集合完全重合时三项相等，MMD² = 0。
+      </p>
+      <p>
+        实现上有个容易写错的地方：内部两项必须<strong>排除对角线</strong>。否则自距离 0 会把
+        <span class="mono">E‖x−x′‖</span> 拉低，损失系统性偏小。
+      </p>
+    </div>
+
+    <div class="fig" data-reveal>
+      <div class="fig__frame">
+        <h4>图 3 · 移动预测集去贴合观测集</h4>
+        <canvas id="mmdField" class="field" aria-label="两个点云，灰色是观测到的扰动后分布，紫色是模型预测，可以调整位移与离散度让 MMD 变小"></canvas>
+        <div class="ctl-row">
+          <div class="ctl-item">
+            <label for="mShift">位移</label>
+            <input type="range" id="mShift" min="0" max="140" step="1" value="40">
+            <span class="val" id="mShiftVal">0.40</span>
+          </div>
+          <div class="ctl-item">
+            <label for="mSpread">离散度</label>
+            <input type="range" id="mSpread" min="50" max="160" step="1" value="100">
+            <span class="val" id="mSpreadVal">1.00</span>
+          </div>
+          <button class="btn" id="mFit">自动最小化</button>
+        </div>
+        <dl class="readout">
+          <div><dt>MMD²</dt><dd id="mVal">—</dd></div>
+          <div><dt>最优位移</dt><dd id="mBest">—</dd></div>
+        </dl>
+      </div>
+      <figcaption>
+        <b>点云是合成的二维示意，MMD 是真算的。</b>
+        灰色是观测到的扰动后分布（固定），紫色是预测（可调）。
+        观测那片做了剪切变形，而预测只有「平移 + 等比缩放」两个自由度，
+        所以 MMD² 有一个降不下去的下界 —— 这正是需要表达能力更强的模型的原因。
+      </figcaption>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================== 06 -->
+<section aria-labelledby="s6">
+  <div class="col">
+    <div class="sec-head" data-reveal>
+      <span class="sec-num">06 / 判读</span>
+      <h2>结果怎么读，事先定好</h2>
+      <p>
+        为了避免「看到数字再编故事」，判读规则在实验之前就写死。三种臂之间的关系对应四种结论。
+      </p>
+    </div>
+
+    <div class="col-wide" data-reveal style="padding:0">
+      <div class="tblwrap">
+        <table>
+          <caption>预注册的判读规则</caption>
+          <thead>
+            <tr>
+              <th scope="col">观察到的关系</th>
+              <th scope="col">结论</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="is-g"><td>graph &gt; shuffle &gt; direct</td><td>拓扑有用，信息量也有用</td></tr>
+            <tr class="is-g"><td>graph &gt; shuffle ≈ direct</td><td><strong>拓扑有用</strong>，信息量无用</td></tr>
+            <tr class="is-s"><td>graph ≈ shuffle &gt; direct</td><td>只有信息量有用，<strong>拓扑没用</strong></td></tr>
+            <tr class="is-d"><td>三者相近</td><td>表观先验在这个任务上<strong>没有帮助</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================== 07 -->
+<section aria-labelledby="s7">
+  <div class="col">
+    <div class="sec-head" data-reveal>
+      <span class="sec-num">07 / 评测</span>
+      <h2>cell-eval 的三类读出口</h2>
+      <p>
+        用 <span class="mono">cell-eval2 0.22.0</span> 的官方 <span class="mono">vcc2026</span> preset。
+        只比表达量相关会误导：一个把所有基因都往同一方向预测的模型也能拿高分。
+      </p>
+    </div>
+
+    <ul class="terms" data-reveal>
+      <li><span class="k">表达量</span><span class="v">扰动后表达变化的 Pearson 相关。最直接，但对均值基线太友好。</span></li>
+      <li><span class="k">差异表达</span><span class="v">DE 基因的 AUPRC、倍数变化 Spearman、top-k 重合率。更贴近研究者实际关心的问题。</span></li>
+      <li><span class="k">效应量</span><span class="v">扰动的整体强度排序。不看具体哪些基因，对噪声更稳健。</span></li>
+    </ul>
+
+    <div class="col-wide" data-reveal style="padding:0;margin-top:clamp(28px,4vw,44px)">
+      <div class="tblwrap">
+        <table>
+          <caption>三臂对比（实验未完成，数字留空）</caption>
+          <thead>
+            <tr>
+              <th scope="col">指标</th>
+              <th scope="col">control</th>
+              <th scope="col">mean</th>
+              <th scope="col">direct</th>
+              <th scope="col">shuffle</th>
+              <th scope="col">graph</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="is-d"><td>表达变化 Pearson</td><td class="pending">pending</td><td class="pending">pending</td><td class="pending">pending</td><td class="pending">pending</td><td class="pending">pending</td></tr>
+            <tr class="is-s"><td>DE 基因 AUPRC</td><td class="pending">pending</td><td class="pending">pending</td><td class="pending">pending</td><td class="pending">pending</td><td class="pending">pending</td></tr>
+            <tr class="is-g"><td>效应量 Spearman</td><td class="pending">pending</td><td class="pending">pending</td><td class="pending">pending</td><td class="pending">pending</td><td class="pending">pending</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="prose" data-reveal style="margin-top:26px">
+      <p>
+        <strong>这张表在实验跑完之前不会填任何数字。</strong>
+        与 STATE 论文公布值的比较也单独标注：两者数据集、切分、细胞背景都不同，
+        并排放在一张表里会制造一个虚假的排行榜。表格的意义是让读者看到
+        <strong>同一协议下的五个数</strong>，而不是跨协议排名。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================== 08 -->
+<section aria-labelledby="s8">
+  <div class="col">
+    <div class="sec-head" data-reveal>
+      <span class="sec-num">08 / 限制</span>
+      <h2>最大的方法学弱点，写在显眼处</h2>
+    </div>
+
+    <div class="callout callout--bad" data-reveal>
+      <h3>表观先验与表达数据不是同一个细胞背景</h3>
+      <p>
+        Arc VCC 训练集的 README <strong>没有写明细胞系</strong>。磁盘上可用的公共表观数据是
+        <strong>K562</strong>（ATAC、CTCF/SP1/USF1 ChIP、Hi-C、WGBS）。
+      </p>
+      <p>
+        因此这里构建的 GRN 是一个<strong>跨背景的人类调控先验</strong>，
+        不是为该表达数据匹配的网络。这会让「图是否有用」的检验更难跑出正结果；
+        即使 <span class="mono" style="color:var(--graph)">graph</span> 胜出，
+        也不能据此推断「在这个细胞里表观调控是这样的」。
+      </p>
+    </div>
+
+    <div class="prose" data-reveal style="margin-top:30px">
+      <p>
+        <strong>其它限制。</strong>
+        预训练语料目前只用了 Tabula Sapiens，Orion 与 Tahoe 的观测细胞尚未加入；
+        图传播是单跳的，没有多跳也没有注意力加权；
+        WGBS 甲基化特征已下载但尚未接入；
+        集合大小固定 64，未做超参搜索；
+        服务器为共享环境，实测只有约 4 核可用（请求 16 线程）。
+      </p>
+      <p>
+        未做的防护也记录在这里：没有用嵌套靶基因折来选超参；
+        预训练语料与评测数据可能共享细胞类型，这一点尚未审计。
+      </p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="col">
+    <div class="foot-note">
+      <span>
+        vcellx · 研究原型，未经同行评议。不使用 STATE 权重，不重新分发原始数据。
+      </span>
+      <span>
+        <a href="https://github.com/kainblue100/vcellx">代码</a> ·
+        <a href="docs/provenance.md">数据溯源</a> ·
+        <a href="docs/method.md">方法细节</a>
+      </span>
+    </div>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

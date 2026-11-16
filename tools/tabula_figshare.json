@@ -1,0 +1,172 @@
+{
+  "files": [
+    {
+      "name": "Bladder_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 3932499489,
+      "md5": "334e891b8f26f614d5e17f86616b3a52",
+      "url": "https://ndownloader.figshare.com/files/50850798"
+    },
+    {
+      "name": "Blood_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 3037527756,
+      "md5": "ee5e2856c5e0173d280528cd0fa67cf7",
+      "url": "https://ndownloader.figshare.com/files/50850792"
+    },
+    {
+      "name": "Bone_Marrow_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 1222840322,
+      "md5": "bc9fe98fcdf2cc18f031cc58074f3270",
+      "url": "https://ndownloader.figshare.com/files/50850783"
+    },
+    {
+      "name": "Ear_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 199624331,
+      "md5": "e2b84ad5b2ff8ab1711e59c171ae4eaf",
+      "url": "https://ndownloader.figshare.com/files/50850693"
+    },
+    {
+      "name": "Eye_TSP1_30_version2d_10X_smartseq_scvi_Nov122024_updated.h5ad",
+      "size": 4374025850,
+      "md5": "2564899788688da63d8a4e560cf64df1",
+      "url": "https://ndownloader.figshare.com/files/50850831"
+    },
+    {
+      "name": "Fat_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 4441748497,
+      "md5": "8269b64d360e060b36941a1261fcea0c",
+      "url": "https://ndownloader.figshare.com/files/50850936"
+    },
+    {
+      "name": "Heart_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 1375752255,
+      "md5": "3ccece546952c88da92442a4e0d16ff3",
+      "url": "https://ndownloader.figshare.com/files/50850948"
+    },
+    {
+      "name": "Kidney_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 524034766,
+      "md5": "191c154a15618fc947bc5781b1228fb3",
+      "url": "https://ndownloader.figshare.com/files/50850951"
+    },
+    {
+      "name": "Large_Intestine_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 1220944648,
+      "md5": "bca273ee5e1f0e53fe9053abce56145f",
+      "url": "https://ndownloader.figshare.com/files/50851005"
+    },
+    {
+      "name": "Liver_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 986694079,
+      "md5": "e2a2f54237b8a3df8b17d0d0c5dd1be1",
+      "url": "https://ndownloader.figshare.com/files/50851056"
+    },
+    {
+      "name": "Lung_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 3790956913,
+      "md5": "947f211533a9463e132ac8769c19bd87",
+      "url": "https://ndownloader.figshare.com/files/50851323"
+    },
+    {
+      "name": "Lymph_Node_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 4907454436,
+      "md5": "ca6ef57292fc09c2d901ae6ac494699d",
+      "url": "https://ndownloader.figshare.com/files/50851326"
+    },
+    {
+      "name": "Mammary_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 1581641818,
+      "md5": "d42ad69f09c8363e1fd1df1a13a479a0",
+      "url": "https://ndownloader.figshare.com/files/50851290"
+    },
+    {
+      "name": "Muscle_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 2441016511,
+      "md5": "47bfff1364fca539ef86f68d52cb0558",
+      "url": "https://ndownloader.figshare.com/files/50851320"
+    },
+    {
+      "name": "Ovary_TSP1_30_version2d_10X_smartseq_scvi_Nov262024.h5ad",
+      "size": 2173805633,
+      "md5": "cc07c0b64f1d6a63d1503313228b6e1d",
+      "url": "https://ndownloader.figshare.com/files/50851338"
+    },
+    {
+      "name": "Pancreas_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 865149287,
+      "md5": "872196db64207435810028282d215dc8",
+      "url": "https://ndownloader.figshare.com/files/50851329"
+    },
+    {
+      "name": "Prostate_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 1065240381,
+      "md5": "c5b2c03541312642d0a183015b4c3430",
+      "url": "https://ndownloader.figshare.com/files/50851335"
+    },
+    {
+      "name": "Salivary_Gland_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 2135187171,
+      "md5": "5857613f78fedbb4a6d2504aa33fad37",
+      "url": "https://ndownloader.figshare.com/files/50851341"
+    },
+    {
+      "name": "Skin_TSP1_30_version2d_10X_smartseq_scvi_Nov122024_updated.h5ad",
+      "size": 615423037,
+      "md5": "fa9d2c42b77df3fdf76f0d378db5c969",
+      "url": "https://ndownloader.figshare.com/files/50851344"
+    },
+    {
+      "name": "Small_Intestine_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 2140573487,
+      "md5": "461fb67d76a32840f44fb7d2177e24ae",
+      "url": "https://ndownloader.figshare.com/files/50851431"
+    },
+    {
+      "name": "Spleen_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 3172261758,
+      "md5": "08598787f59fdbb544b7f893eaecf6d7",
+      "url": "https://ndownloader.figshare.com/files/50851440"
+    },
+    {
+      "name": "Stomach_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 1278543079,
+      "md5": "f305f025b821dffcc0afcbfa8c2766e2",
+      "url": "https://ndownloader.figshare.com/files/50851425"
+    },
+    {
+      "name": "Testis_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 443842850,
+      "md5": "71d36d3b676adb0f4e1ddac8f9922cff",
+      "url": "https://ndownloader.figshare.com/files/50851422"
+    },
+    {
+      "name": "Thymus_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 2062511061,
+      "md5": "b9737d1be10d9f9bc827ee6c2372c7e5",
+      "url": "https://ndownloader.figshare.com/files/50851428"
+    },
+    {
+      "name": "Tongue_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 2362678253,
+      "md5": "8f941c3ef0675073f7424e92744648b6",
+      "url": "https://ndownloader.figshare.com/files/50851434"
+    },
+    {
+      "name": "Trachea_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 1140842603,
+      "md5": "d77cdd1e0574e586710ca895dbe3d523",
+      "url": "https://ndownloader.figshare.com/files/50851473"
+    },
+    {
+      "name": "Uterus_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 1059376449,
+      "md5": "78826f6f50b64b5b690966e5b275978a",
+      "url": "https://ndownloader.figshare.com/files/50851470"
+    },
+    {
+      "name": "Vasculature_TSP1_30_version2d_10X_smartseq_scvi_Nov122024.h5ad",
+      "size": 2584536594,
+      "md5": "b0f3c00bf6b73f72824b91a219b93cb8",
+      "url": "https://ndownloader.figshare.com/files/50851476"
+    }
+  ]
+}
