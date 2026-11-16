@@ -299,7 +299,9 @@ Arc ∩ Tahoe  <span class="n">17,741 (98.1%)</span>
       <figcaption>
         <b>数值为示意，掩码逻辑是真的。</b>
         真实面板是 4,096 个基因（按外部数据方差选出，全部存在于 Arc 与 Tabula），
-        编码器 3.41 M 参数。目前已观测到的掩码重建损失：<span class="mono">0.680 → 0.582（第 1–5 epoch）</span>。
+        编码器 3.41 M 参数，已在 150,000 个 Tabula 细胞上训练完成 8 个 epoch，
+        耗时 2,892 秒。实测掩码重建损失：
+        <span class="mono">0.680 → 0.576</span>（第 1 至第 8 epoch，单调下降）。
       </figcaption>
     </div>
   </div>
