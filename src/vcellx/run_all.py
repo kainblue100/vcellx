@@ -26,6 +26,9 @@ ROOT_DEFAULT = "/mnt/storage/bzhang/AIVC"
 ARC_H5 = os.path.join(ROOT_DEFAULT, "arc-institute-virtual-cell-dataset/adata_Training.h5ad")
 K562 = os.path.join(ROOT_DEFAULT, "epigenomics/k562-encode-matched-bulk-v1")
 K562_TF = os.path.join(ROOT_DEFAULT, "epigenomics/k562-tf-chip-matched-v2")
+# Bin-level contact matrix. The juicer loop calls in k562-encode-matched-bulk-v1
+# are 52k genome-wide, which over a 2000-gene panel leaves the median degree at 0.
+MCOOL = os.path.join(ROOT_DEFAULT, "epigenomics/raw/4dn/HFFc6/4DNFIB59T7NN.mcool")
 
 
 def stage_data(work: str, n_hvg: int, force: bool):
@@ -49,33 +52,49 @@ def stage_epi(work: str, genes, force: bool):
         z = np.load(out, allow_pickle=True)
         print(f"[epi] cached: {z['X'].shape}, ok={int(z['ok'].sum())}", flush=True)
         return z["X"], z["ok"], list(z["names"])
-    F, ok, names = epi.run(genes, work, k562_dir=K562)
-    print(f"[epi] {time.time()-t0:.0f}s  features {F.shape}", flush=True)
+    F, ok, names = epi.run(genes, work, k562_dir=K562, tf_dir=K562_TF)
+    print(f"[epi] {time.time()-t0:.0f}s  features {F.shape}  "
+          f"names={list(names)}", flush=True)
     return F, ok, names
 
 
-def stage_graph(work: str, genes, force: bool):
+def stage_graph(work: str, genes, force: bool, resolution: int = 100000,
+                topk: int = 10, quantile: float = 0.90):
+    """Build the GRN from the bin-level contact matrix.
+
+    The juicer loop calls were measured and rejected: over a 2000-gene panel they
+    give 15 edges at a 1 kb promoter window and the median degree stays 0 even at
+    a 100 kb window. A bin-level matrix is the source that actually connects the
+    panel.
+    """
     from .epi import ensure_gencode, read_tss
     from . import grn
     t0 = time.time()
-    gp = os.path.join(work, "graph.npz")
+    gp = os.path.join(work, f"graph_{resolution}.npz")
     if os.path.exists(gp) and not force:
         z = np.load(gp, allow_pickle=True)
-        print(f"[graph] cached: edges={int(z['summary'][1]) if False else 'see summary'}", flush=True)
-        return z["A"], z["A_shuf"], json.loads(str(z["summary"]))
+        summary = json.loads(str(z["summary"]))
+        print(f"[graph] cached: edges={summary.get('n_edges')}", flush=True)
+        return z["A"], z["A_shuf"], summary
+
     gtf = ensure_gencode(work)
     tss = read_tss(gtf, genes)
-    loops = grn.read_loops(os.path.join(K562, "ENCFF757IIX.bedpe.gz"), min_fdr=0.05)
-    loops += grn.read_loops(os.path.join(K562, "ENCFF134HIZ.bedpe.gz"), min_fdr=0.05)
-    print(f"[graph] loops {len(loops):,}", flush=True)
-    A, deg, summary = grn.build_graph(genes, tss, loops, promoter_pad=1000, topk=10)
+    A, deg, summary = grn.build_graph_from_mcool(
+        genes, tss, MCOOL, resolution=resolution, topk=topk,
+        min_count_quantile=quantile)
     A_shuf, sinfo = grn.shuffle_degree_matched(A, seed=42)
     summary["shuffle"] = sinfo
-    np.savez_compressed(gp, A=A.toarray().astype(np.float32) if A.nnz < 4e6 else A,
-                        A_shuf=A_shuf.toarray().astype(np.float32) if A_shuf.nnz < 4e6 else A_shuf,
+
+    np.savez_compressed(gp,
+                        A=A.toarray().astype(np.float32),
+                        A_shuf=A_shuf.toarray().astype(np.float32),
                         summary=np.array(json.dumps(summary)))
     json.dump(summary, open(os.path.join(work, "graph_summary.json"), "w"), indent=2)
-    print(f"[graph] {time.time()-t0:.0f}s  {summary}", flush=True)
+    print(f"[graph] {time.time()-t0:.0f}s  edges={summary['n_edges']}  "
+          f"isolated={summary['isolated_genes']}/{summary['n_genes']}  "
+          f"deg_median={summary['degree_median']:.0f}  "
+          f"deg_mean={summary['degree_mean']:.1f}  "
+          f"deg_max={summary['degree_max']}", flush=True)
     return A, A_shuf, summary
 
 

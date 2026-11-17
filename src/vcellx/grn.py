@@ -26,16 +26,22 @@ import scipy.sparse as sp
 
 
 def read_loops(path: str, min_fdr: float = 0.05, use_col: str = "observed"):
-    """Read juicer_tools bedpe loops -> list of (chr1, s1, e1, chr2, s2, e2, w)."""
+    """Read juicer_tools bedpe loops -> list of (chr1, s1, e1, chr2, s2, e2, w).
+
+    juicer writes its column header with a leading '#', so a naive
+    `skip lines starting with #` drops the header and the FDR filter then never
+    applies (it silently had no effect in the first version). The header is
+    recognised before the skip.
+    """
     loops = []
     with gzip.open(path, "rt", encoding="utf-8", errors="replace") as f:
         header = None
         for line in f:
-            if line.startswith("#"):
-                continue
             p = line.rstrip("\n").split("\t")
-            if header is None and p[0] == "chr1":
-                header = p
+            if p and p[0].lstrip("#") == "chr1":
+                header = [c.lstrip("#") for c in p]
+                continue
+            if line.startswith("#"):
                 continue
             if len(p) < 12:
                 continue
@@ -50,7 +56,6 @@ def read_loops(path: str, min_fdr: float = 0.05, use_col: str = "observed"):
                     w = float(p[11])
                 except ValueError:
                     w = 1.0
-            # fdr filter, if present
             if header and "fdrBL" in header:
                 k = header.index("fdrBL")
                 if len(p) > k:
@@ -61,6 +66,131 @@ def read_loops(path: str, min_fdr: float = 0.05, use_col: str = "observed"):
                         pass
             loops.append((p[0], x1, x2, p[3], y1, y2, w))
     return loops
+
+
+# --------------------------------------------------------------------------
+# bin-level contact matrix (cooler .mcool read directly with h5py)
+# --------------------------------------------------------------------------
+def build_graph_from_mcool(genes, tss, mcool_path: str, resolution: int = 100000,
+                           topk: int = 10, min_count_quantile: float = 0.90):
+    """Gene-gene contact graph from a bin-level Hi-C matrix.
+
+    Loop calls are far too sparse for a 2000-gene panel (measured: 15 edges at a
+    1 kb promoter window, median degree 0). The contact matrix at 100 kb gives
+    every gene bin hundreds of partners, which is what makes a usable prior.
+
+    Only the pixels belonging to bins that actually contain a panel gene are
+    read, using the bin1_offset index, so a 3.5e8-pixel matrix costs a few
+    hundred megabytes rather than several gigabytes.
+
+    Resolution is reported with the graph: at 100 kb a bin holds several genes,
+    so an edge means "these two genes sit in contacting 100 kb bins", not
+    "these two promoters loop to each other".
+    """
+    import h5py
+
+    G = len(genes)
+    by_chrom = {}
+    for i, g in enumerate(genes):
+        if g not in tss:
+            continue
+        c, t, _ = tss[g]
+        by_chrom.setdefault(c, []).append((t, i))
+
+    with h5py.File(mcool_path, "r") as f:
+        grp = f["resolutions"][str(resolution)]
+        chrom_names = [s.decode() if isinstance(s, bytes) else str(s)
+                       for s in grp["chroms"]["name"][:]]
+        chrom_len = grp["chroms"]["length"][:]
+        b_chrom = grp["bins"]["chrom"][:]
+        b_start = grp["bins"]["start"][:]
+        b_end = grp["bins"]["end"][:]
+        bin1_off = grp["indexes"]["bin1_offset"][:]
+        pix_b1 = grp["pixels"]["bin1_id"]
+        pix_b2 = grp["pixels"]["bin2_id"]
+        pix_ct = grp["pixels"]["count"]
+
+        name2idx = {n: i for i, n in enumerate(chrom_names)}
+
+        # gene TSS -> bin id
+        gene_bin = {}
+        for c, lst in by_chrom.items():
+            ci = name2idx.get(c)
+            if ci is None:
+                continue
+            sel = np.where(b_chrom == ci)[0]
+            if len(sel) == 0:
+                continue
+            starts = b_start[sel]
+            for t, gi in lst:
+                k = int(np.searchsorted(starts, t, side="right")) - 1
+                if k >= 0:
+                    gene_bin[gi] = int(sel[k])
+
+    bin2genes = {}
+    for gi, b in gene_bin.items():
+        bin2genes.setdefault(b, []).append(gi)
+
+    # read only the pixels of bins that contain a panel gene
+    rows, cols, vals = [], [], []
+    with h5py.File(mcool_path, "r") as f:
+        grp = f["resolutions"][str(resolution)]
+        pix_b1 = grp["pixels"]["bin1_id"]
+        pix_b2 = grp["pixels"]["bin2_id"]
+        pix_ct = grp["pixels"]["count"]
+        bin1_off = grp["indexes"]["bin1_offset"][:]
+        for b1 in sorted(bin2genes):
+            s, e = int(bin1_off[b1]), int(bin1_off[b1 + 1])
+            if e <= s:
+                continue
+            b2 = pix_b2[s:e]
+            ct = pix_ct[s:e]
+            hit = np.isin(b2, list(bin2genes.keys()))
+            if not hit.any():
+                continue
+            b2h = b2[hit]
+            cth = ct[hit]
+            for bb, cc in zip(b2h, cth):
+                for ga in bin2genes[b1]:
+                    for gb in bin2genes[int(bb)]:
+                        if ga == gb:
+                            continue
+                        rows.append(ga); cols.append(gb); vals.append(float(cc))
+
+    if not rows:
+        raise SystemExit("contact graph has no edges")
+
+    A = sp.coo_matrix((vals, (rows, cols)), shape=(G, G)).tocsr()
+    A.sum_duplicates()
+    A = A.maximum(A.T)
+
+    # drop weak contacts: keep edges above a count quantile so the graph is the
+    # strong-contact backbone rather than every nonzero read pair
+    if min_count_quantile > 0 and A.nnz:
+        thr = float(np.quantile(A.data, min_count_quantile))
+        A = A.multiply(A >= thr).tocsr()
+        A.eliminate_zeros()
+
+    if topk > 0:
+        A = _topk(A, topk)
+
+    deg = np.asarray((A > 0).sum(axis=1)).ravel()
+    summary = {
+        "n_genes": int(G),
+        "n_genes_with_bin": int(len(gene_bin)),
+        "n_edges": int((A > 0).nnz // 2),
+        "isolated_genes": int((deg == 0).sum()),
+        "degree_median": float(np.median(deg)),
+        "degree_mean": float(deg.mean()),
+        "degree_max": int(deg.max()),
+        "resolution_bp": int(resolution),
+        "count_quantile": min_count_quantile,
+        "topk": topk,
+        "source": os.path.basename(mcool_path) + f" @ {resolution} bp",
+        "note": ("bins hold several genes at this resolution, so an edge means "
+                 "'contacting bins', not a promoter-promoter loop"),
+    }
+    return A.tocsr(), deg, summary
 
 
 def _which_genes(chrom_starts, lo, hi):

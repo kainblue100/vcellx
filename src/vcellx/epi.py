@@ -155,14 +155,14 @@ def _overlap_sum(starts, ends, scores, lo, hi):
 def build_features(genes, tss_map, peak_sets: dict, out_path: str):
     """(n_genes, n_features) float32 + availability mask + feature names.
 
-    Features per gene, in this order:
-      log1p(ATAC promoter signal), ATAC peak count in promoter,
-      then for each TF: log1p(signal), peak count,
-      log1p(gene-to-TSS distance proxy is not used; coordinates are only for mapping)
+    Feature names must be built by exactly the same loop that fills the matrix.
+    Building them separately is how the original version broke: it pre-seeded
+    ["atac_sig", "atac_n"] and then the loop added another pair for atac too,
+    so names had two more entries than each row.
     """
-    names = ["atac_sig", "atac_n"]
-    for tf in peak_sets:
-        names += [f"{tf}_sig", f"{tf}_n"]
+    names = []
+    for key in peak_sets:
+        names += [f"{key}_sig", f"{key}_n"]
 
     G = len(genes)
     F = np.zeros((G, len(names)), dtype=np.float32)
@@ -197,8 +197,15 @@ def build_features(genes, tss_map, peak_sets: dict, out_path: str):
 
 
 def run(genes, workdir: str, atac_url: str | None = None,
-        k562_dir: str | None = None, out_name: str = "epi_features.npz"):
-    """Convenience driver used by the CLI."""
+        k562_dir: str | None = None, tf_dir: str | None = None,
+        out_name: str = "epi_features.npz"):
+    """Convenience driver used by the CLI.
+
+    k562_dir holds the bulk assays (ATAC, WGBS); tf_dir holds the TF ChIP peaks.
+    They are different ENCODE experiment sets and live in different directories
+    on this server, which is why passing only one of them silently produced an
+    ATAC-only feature matrix.
+    """
     os.makedirs(workdir, exist_ok=True)
     gtf = ensure_gencode(workdir)
     tss = read_tss(gtf, genes)
@@ -214,14 +221,17 @@ def run(genes, workdir: str, atac_url: str | None = None,
         if os.path.exists(cand):
             peak_sets["atac"] = read_bed_gz(cand)
 
-    if k562_dir:
+    tdir = tf_dir or k562_dir
+    if tdir:
         tf_files = {"ctcf": "ENCFF769AUF.bed.gz",
                     "sp1": "ENCFF528QDU.bed.gz",
                     "usf1": "ENCFF679COG.bed.gz"}
         for tf, fn in tf_files.items():
-            p = os.path.join(k562_dir, fn)
+            p = os.path.join(tdir, fn)
             if os.path.exists(p):
                 peak_sets[tf] = read_bed_gz(p)
+            else:
+                print(f"  TF peak file missing: {p}", flush=True)
 
     if not peak_sets:
         raise SystemExit("no peak files found")

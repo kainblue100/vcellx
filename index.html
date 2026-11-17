@@ -38,7 +38,7 @@
       <div class="fact"><dt>靶基因切分</dt><dd>98 / 22 / 30 <span>不相交</span></dd></div>
       <div class="fact"><dt>预训练语料</dt><dd>1,136,218 <span>细胞</span></dd></div>
       <div class="fact"><dt>基因面板</dt><dd>4,096 <span>共享</span></dd></div>
-      <div class="fact"><dt>GRN 边</dt><dd>K562 <span>Hi-C 环</span></dd></div>
+      <div class="fact"><dt>GRN 边</dt><dd>12,015 <span>100 kb 接触</span></dd></div>
       <div class="fact"><dt>实验臂</dt><dd>3 <span>graph/shuffle/direct</span></dd></div>
     </dl>
   </div>
@@ -214,17 +214,51 @@ Arc ∩ Tahoe  <span class="n">17,741 (98.1%)</span>
     </div>
     <div class="prose" data-reveal>
       <p>
-        构造规则刻意简单、可审计：拿 K562 的 in-situ Hi-C 环文件，如果一个环的两个锚点
-        分别落在基因 A 和基因 B 的启动子窗口（TSS ± 1 kb）内，就加一条边，权重用该环的
-        <span class="mono">observed</span> 计数。每节点保留 top-10 边后对称化。
+        这里有个必须先说的<strong>负面结果</strong>。最初我用 K562 的 Hi-C <strong>环调用</strong>
+        （全基因组 5 万个环）：如果一个环的两个锚点分别覆盖两个基因的启动子，就加边。
+        实测下来，2000 个基因的面板上只有 <strong>15 条边</strong>，
+        中位度数是 <strong>0</strong>。
       </p>
       <p>
-        <strong>建图过程不看表达数据，也不看留出靶基因的响应。</strong>启动子坐标来自 GENCODE v44。
+        把启动子窗口从 ±1 kb 一路放宽到 ±100 kb，边数涨到 890，
+        但<strong>中位度数仍然是 0</strong>，一半以上基因依旧孤立。
+        原因是结构性的：环调用是位点对位点的，而面板只取 2000 个基因，
+        两个锚点同时撞上面板基因的概率极低。<strong>这不是参数没调好，是数据源不合适。</strong>
+      </p>
+    </div>
+
+    <div class="eq" data-reveal>
+      <span class="n">环调用方案（已否决）</span><br>
+      promoter 窗口  ±1 kb  → 边 15　孤立 1972/2000　中位度 <span class="d">0</span><br>
+      　　　　　　  ±100 kb → 边 890　孤立 1080/2000　中位度 <span class="d">0</span>
+    </div>
+
+    <div class="prose" data-reveal>
+      <p>
+        改用 <strong>bin 级接触矩阵</strong>（4DN HFFc6 Hi-C 多分辨率矩阵，22.8 GB）。
+        <span class="mono">.mcool</span> 就是 HDF5，可以直接用 h5py 读：
+        把每个基因的 TSS 映射到 100 kb 的 bin，用 <span class="mono">bin1_offset</span>
+        索引只读取含面板基因的那些 bin，两个 bin 都含面板基因时在基因之间加边。
+      </p>
+    </div>
+
+    <div class="eq" data-reveal>
+      <span class="n">接触矩阵方案（采用）</span><br>
+      100 kb 分辨率　边 <span class="g">12,015</span>　孤立 50/2000
+      　中位度 <span class="g">11</span>　平均 12.0　最大 28
+    </div>
+
+    <div class="prose" data-reveal>
+      <p>
+        这个粗糙化必须说明：100 kb 的一个 bin 里通常有好几个基因，
+        所以一条边的含义是「<strong>这两个基因处在互相接触的 100 kb 区间内</strong>」，
+        不是「这两个启动子之间有环」。这条说明会随图摘要一起报告，不藏在脚注里。
       </p>
       <p>
         下面的图可以点。它画出靶基因的一跳邻域，以及
         <span class="mono" style="color:var(--graph)">graph</span> 臂实际聚合到的信息。
-        切到打乱模式，你会看到同一个节点<strong>邻居数量不变</strong>，但连的对象换了。
+        切到打乱模式，你会看到同一个节点<strong>邻居数量不变</strong>，但连的对象换了
+        （实测执行了 480,600 次受约束换边）。
       </p>
     </div>
 
