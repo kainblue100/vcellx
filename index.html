@@ -29,7 +29,8 @@
 
     <div class="status">
       <b>研究状态</b>
-      原型，结果未完成。预训练编码器正在训练，三臂扰动模型与 <code>cell-eval2</code> 评测尚未运行。
+      原型，结果未完成。预训练编码器已完成；表观先验的<strong>前提检验已完成，结果是否定的</strong>（见 06 节）；
+      三臂扰动模型与 <code>cell-eval2</code> 评测尚未运行。
       <strong>本页不包含任何未真实跑出的性能数字</strong>，结果表的对应格子会留空直到实验完成。
     </div>
 
@@ -403,10 +404,111 @@ Arc ∩ Tahoe  <span class="n">17,741 (98.1%)</span>
 </section>
 
 <!-- ======================================================== 06 -->
+<section aria-labelledby="s6v">
+  <div class="col">
+    <div class="sec-head" data-reveal>
+      <span class="sec-num">06 / 前提检验</span>
+      <h2>先用配套多组学数据，检验这个前提成不成立</h2>
+      <p>
+        两个臂都依赖同一件事：<strong>表观信号携带关于表达的信息</strong>。
+        花几小时训练之前，应该先直接测它。用 GSE303006 里
+        <strong>同一个细胞同时测了 RNA 和 ATAC</strong> 的数据（949 个细胞匹配）。
+      </p>
+    </div>
+
+    <div class="prose" data-reveal>
+      <p>
+        我做了四次，前三次都是设计错误 —— 这三次错误本身值得记录，因为它们每一个
+        都会导致错误结论。
+      </p>
+    </div>
+
+    <div class="col-wide" data-reveal style="padding:0">
+      <div class="tblwrap">
+        <table>
+          <caption>同一个检验的四次迭代</caption>
+          <thead>
+            <tr>
+              <th scope="col">设计</th>
+              <th scope="col" class="num">结果</th>
+              <th scope="col">问题</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="is-d">
+              <td>逐细胞相关</td>
+              <td class="num">r = 0.004</td>
+              <td>ATAC 非零率只有 13%，被稀疏性淹没</td>
+            </tr>
+            <tr class="is-d">
+              <td>20 组随机池</td>
+              <td class="num">r = −0.011</td>
+              <td>随机池的细胞类型构成相同，组间只剩计数噪声</td>
+            </tr>
+            <tr class="is-s">
+              <td>按细胞类型聚合</td>
+              <td class="num">r = <strong>0.542</strong></td>
+              <td><strong>打乱对照也是 0.544</strong> —— 完全是共享深度伪影</td>
+            </tr>
+            <tr class="is-g">
+              <td>占比归一化 + 配对检验</td>
+              <td class="num">r = <strong>−0.012</strong></td>
+              <td>受控结果，与打乱无法区分</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="callout callout--bad" data-reveal style="margin-top:28px">
+      <h3>第三次迭代最危险</h3>
+      <p>
+        0.542 看起来像教科书级的生物学信号。但如果做打乱基因标签的对照，会发现
+        <strong>对照也是 0.544</strong>。原因是共享的测序深度因子：
+        高深度的细胞类型在所有基因上都偏高，于是<strong>任意两个基因之间都会相关</strong>。
+      </p>
+      <p>
+        省掉打乱对照，就会写出一个完全错误的正面结论。这是这类分析里最容易犯的错。
+      </p>
+    </div>
+
+    <div class="prose" data-reveal style="margin-top:26px">
+      <p>
+        受控结果（<span class="mono">19,555</span> 个可比较基因）：
+      </p>
+    </div>
+
+    <div class="eq" data-reveal>
+      真实 − 打乱　中位差 <span class="d">−0.00341</span>　均值差 <span class="d">−0.00472</span><br>
+      t 检验 <span class="n">t = −1.78　p = 0.074，不显著</span><br>
+      Wilcoxon <span class="n">p = 0.112，不显著</span><br>
+      真实优于打乱的基因 <span class="d">49.5%</span>　<span class="n">← 相当于掷硬币</span>
+    </div>
+
+    <div class="prose" data-reveal>
+      <p>
+        <strong>结论：在去掉深度混杂后，启动子 ATAC 与该基因自身 RNA 的相关性，
+        与打乱基因标签的零分布无法区分。</strong>点估计还是微负的。
+      </p>
+      <p>
+        但这不是「已推翻」，而是「未证实」。测试本身有多处限制：
+        只有 <strong>17 个细胞类型</strong>（统计功效低）、数据是混合组织、
+        我只用了<strong>启动子窗口</strong>与 fragment 中点（标准做法是基因体活性评分）、
+        RNA 矩阵含 50 万个分数值。
+      </p>
+      <p>
+        所以准确的表述是：<strong>这个前提不能想当然，而且在当前数据里效应不显著。</strong>
+        这也意味着我测的是最弱的那版表观特征 —— 基因体活性评分与更宽的窗口应当先试。
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================== 07 -->
 <section aria-labelledby="s6">
   <div class="col">
     <div class="sec-head" data-reveal>
-      <span class="sec-num">06 / 判读</span>
+      <span class="sec-num">07 / 判读</span>
       <h2>结果怎么读，事先定好</h2>
       <p>
         为了避免「看到数字再编故事」，判读规则在实验之前就写死。三种臂之间的关系对应四种结论。
@@ -439,7 +541,7 @@ Arc ∩ Tahoe  <span class="n">17,741 (98.1%)</span>
 <section aria-labelledby="s7">
   <div class="col">
     <div class="sec-head" data-reveal>
-      <span class="sec-num">07 / 评测</span>
+      <span class="sec-num">08 / 评测</span>
       <h2>cell-eval 的三类读出口</h2>
       <p>
         用 <span class="mono">cell-eval2 0.22.0</span> 的官方 <span class="mono">vcc2026</span> preset。
@@ -491,11 +593,24 @@ Arc ∩ Tahoe  <span class="n">17,741 (98.1%)</span>
 <section aria-labelledby="s8">
   <div class="col">
     <div class="sec-head" data-reveal>
-      <span class="sec-num">08 / 限制</span>
+      <span class="sec-num">09 / 限制</span>
       <h2>最大的方法学弱点，写在显眼处</h2>
     </div>
 
     <div class="callout callout--bad" data-reveal>
+      <h3>表观先验的前提没有得到证实</h3>
+      <p>
+        用配套的单细胞多组学数据（GSE303006，949 个细胞同时有 RNA 和 ATAC）检验后，
+        <strong>启动子 ATAC 与同一细胞表达的相关性，在去掉深度混杂后与打乱对照无法区分</strong>
+        （t 检验 p = 0.074）。细节与三次错误设计见 06 节。
+      </p>
+      <p>
+        这不等于先验没有用，但它意味着<strong>不能把「表观信号携带表达信息」当成既定前提</strong>。
+        而且这次测的是最弱的那版特征：只有启动子窗口，没有用基因体活性评分。
+      </p>
+    </div>
+
+    <div class="callout callout--bad" data-reveal style="margin-top:22px">
       <h3>表观先验与表达数据不是同一个细胞背景</h3>
       <p>
         Arc VCC 训练集的 README <strong>没有写明细胞系</strong>。磁盘上可用的公共表观数据是
