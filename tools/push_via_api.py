@@ -1,11 +1,24 @@
-"""Push changed files through the GitHub contents API.
+"""Push the repository through the GitHub contents API.
 
 `git push` over https://github.com:443 keeps failing on this host
-("Could not connect to server") while api.github.com works fine, so when the
-git transport is unavailable we write the files through the API instead. The
-commit message and author are preserved; the resulting commit is identical in
-content to what git would have produced for these files.
+("Empty reply from server" / "Could not connect") while api.github.com works
+fine, so when the git transport is unavailable we write the tree through the
+API instead.
+
+The first version of this script hard-coded the two files it knew about and
+silently shipped a commit that omitted everything else. This version walks the
+working tree, so nothing is left behind, and takes the commit message from a
+file so it is not lost either.
+
+Usage
+  python push_via_api.py [-m <message-file>] [--dry-run]
+
+Blob SHAs are content-addressed, so unchanged files re-upload to the same SHA
+and the resulting tree is identical to what git would have produced.
 """
+from __future__ import annotations
+
+import argparse
 import base64
 import json
 import os
@@ -17,13 +30,10 @@ REPO = "kainblue100/vcellx"
 ROOT = r"D:\coda_matlab\vcellx"
 BRANCH = "main"
 
-FILES = ["README.md", "index.html"]
-MSG = ("预训练完成：记录真实的编码器结果\n\n"
-       "预训练编码器已在 150,000 个 Tabula Sapiens 细胞上完成 8 个 epoch，\n"
-       "掩码重建损失 0.680 -> 0.576，参数量 3.41 M，耗时 2,892 秒。\n"
-       "README 与说明页的对应文字从「正在训练」改为已完成，并写入真实数字。\n"
-       "三臂扰动训练与 cell-eval2 评测仍未运行，结果表保持 pending。\n\n"
-       "Co-authored-by: CommandCodeBot <noreply@commandcode.ai>\n")
+# never ship these, whatever the tree contains
+SKIP_DIRS = {".git", "__pycache__", ".ipynb_checkpoints", "node_modules"}
+SKIP_EXT = {".pyc", ".pyo", ".log", ".tmp", ".part"}
+SKIP_NAMES = {".DS_Store", "Thumbs.db"}
 
 
 def gh(*args, input_text=None):
@@ -42,38 +52,92 @@ def api(path, method="GET", body=None):
     return json.loads(gh(*args))
 
 
-print("=== 读取当前 main 的 commit ===")
-ref = api(f"repos/{REPO}/git/ref/heads/{BRANCH}")
-head_sha = ref["object"]["sha"]
-print("  head:", head_sha[:10])
+def collect():
+    """Every shippable file in the working tree, as repo-relative paths."""
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(ROOT):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        for fn in filenames:
+            ext = os.path.splitext(fn)[1].lower()
+            if ext in SKIP_EXT or fn in SKIP_NAMES:
+                continue
+            full = os.path.join(dirpath, fn)
+            rel = os.path.relpath(full, ROOT).replace("\\", "/")
+            out[rel] = full
+    return out
 
-commit = api(f"repos/{REPO}/git/commits/{head_sha}")
-base_tree = commit["tree"]["sha"]
-print("  base tree:", base_tree[:10])
 
-print("=== 上传 blob ===")
-entries = []
-for rel in FILES:
-    p = os.path.join(ROOT, rel)
-    data = open(p, "rb").read()
-    blob = api(f"repos/{REPO}/git/blobs", "POST", {
-        "content": base64.b64encode(data).decode("ascii"),
-        "encoding": "base64",
-    })
-    entries.append({"path": rel, "mode": "100644", "type": "blob", "sha": blob["sha"]})
-    print(f"  {rel:14s} {len(data):>7,} bytes  -> {blob['sha'][:10]}")
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("-m", "--message", help="file containing the commit message")
+    ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
 
-print("=== 建 tree ===")
-tree = api(f"repos/{REPO}/git/trees", "POST", {"base_tree": base_tree, "tree": entries})
-print("  tree:", tree["sha"][:10])
+    msg = ""
+    if a.message:
+        msg = open(a.message, encoding="utf-8").read()
+    if not msg.strip():
+        msg = "Sync repository\n\nCo-authored-by: CommandCodeBot <noreply@commandcode.ai>\n"
+    if "CommandCodeBot" not in msg:
+        msg = msg.rstrip() + "\n\nCo-authored-by: CommandCodeBot <noreply@commandcode.ai>\n"
 
-print("=== 建 commit ===")
-newc = api(f"repos/{REPO}/git/commits", "POST", {
-    "message": MSG, "tree": tree["sha"], "parents": [head_sha],
-})
-print("  commit:", newc["sha"][:10])
+    files = collect()
+    print(f"=== 工作树中共 {len(files)} 个文件 ===")
 
-print("=== 更新 ref ===")
-api(f"repos/{REPO}/git/refs/heads/{BRANCH}", "PATCH", {"sha": newc["sha"]})
-print("  ref updated ->", newc["sha"][:10])
-print("\nDONE")
+    ref = api(f"repos/{REPO}/git/ref/heads/{BRANCH}")
+    head_sha = ref["object"]["sha"]
+    base_tree = api(f"repos/{REPO}/git/commits/{head_sha}")["tree"]["sha"]
+    print(f"  remote head {head_sha[:10]}  tree {base_tree[:10]}")
+
+    # what is already on the remote
+    remote = {}
+    def walk(sha, prefix=""):
+        t = api(f"repos/{REPO}/git/trees/{sha}")
+        for e in t.get("tree", []):
+            if e["type"] == "tree":
+                walk(e["sha"], prefix + e["path"] + "/")
+            elif e["type"] == "blob":
+                remote[prefix + e["path"]] = e["sha"]
+    walk(base_tree, "")
+    print(f"  remote 现有 {len(remote)} 个文件")
+
+    changed, new, dropped = [], [], sorted(set(remote) - set(files))
+    entries = []
+    for rel, full in sorted(files.items()):
+        data = open(full, "rb").read()
+        blob = api(f"repos/{REPO}/git/blobs", "POST", {
+            "content": base64.b64encode(data).decode("ascii"),
+            "encoding": "base64",
+        })
+        if remote.get(rel) != blob["sha"]:
+            (new if rel not in remote else changed).append(rel)
+        entries.append({"path": rel, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+
+    for rel in dropped:
+        print(f"  drop  {rel}")
+
+    print(f"\n=== 变更 ===")
+    for r in new:
+        print(f"  新增  {r}")
+    for r in changed:
+        print(f"  修改  {r}")
+    print(f"  共 {len(new)} 新增 / {len(changed)} 修改 / {len(dropped)} 删除")
+
+    if a.dry_run:
+        print("\n--dry-run，不提交")
+        return
+
+    if not (new or changed or dropped):
+        print("\n没有变化，无需提交")
+        return
+
+    tree = api(f"repos/{REPO}/git/trees", "POST",
+               {"base_tree": base_tree, "tree": entries})
+    newc = api(f"repos/{REPO}/git/commits", "POST",
+               {"message": msg, "tree": tree["sha"], "parents": [head_sha]})
+    api(f"repos/{REPO}/git/refs/heads/{BRANCH}", "PATCH", {"sha": newc["sha"]})
+    print(f"\n已推送 -> https://github.com/{REPO}/commit/{newc['sha']}")
+
+
+if __name__ == "__main__":
+    main()
