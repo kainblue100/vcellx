@@ -53,7 +53,12 @@ def api(path, method="GET", body=None):
 
 
 def collect():
-    """Every shippable file in the working tree, as repo-relative paths."""
+    """Every shippable file in the working tree, as repo-relative paths.
+
+    .gitignore is authoritative: an earlier version of this script ignored it
+    and pushed .shots/*.png, files the repo explicitly excludes. Ask git which
+    paths are ignored rather than reimplementing the pattern language.
+    """
     out = {}
     for dirpath, dirnames, filenames in os.walk(ROOT):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
@@ -64,6 +69,13 @@ def collect():
             full = os.path.join(dirpath, fn)
             rel = os.path.relpath(full, ROOT).replace("\\", "/")
             out[rel] = full
+
+    if out:
+        p = subprocess.run(["git", "check-ignore", "--stdin"], cwd=ROOT,
+                           input="\n".join(out), capture_output=True, text=True)
+        ignored = {line.strip() for line in p.stdout.splitlines() if line.strip()}
+        for rel in ignored:
+            out.pop(rel, None)
     return out
 
 
@@ -113,9 +125,12 @@ def main():
             (new if rel not in remote else changed).append(rel)
         entries.append({"path": rel, "mode": "100644", "type": "blob", "sha": blob["sha"]})
 
+    # Deletions must be explicit. With base_tree set, any path the new tree does
+    # not mention is kept from the base tree, so omitting these would report a
+    # deletion that never happened.
     for rel in dropped:
+        entries.append({"path": rel, "mode": "100644", "type": "blob", "sha": None})
         print(f"  drop  {rel}")
-
     print(f"\n=== 变更 ===")
     for r in new:
         print(f"  新增  {r}")
