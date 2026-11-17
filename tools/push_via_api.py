@@ -71,9 +71,13 @@ def collect():
             out[rel] = full
 
     if out:
-        p = subprocess.run(["git", "check-ignore", "--stdin"], cwd=ROOT,
-                           input="\n".join(out), capture_output=True, text=True)
-        ignored = {line.strip() for line in p.stdout.splitlines() if line.strip()}
+        # -z is required. Without it git quotes the output (and escapes a stray
+        # CR that Windows newline translation puts on the stdin paths), so the
+        # returned strings never match the dict keys and the filter silently
+        # does nothing -- which is how .shots/*.png got published anyway.
+        p = subprocess.run(["git", "check-ignore", "--stdin", "-z"], cwd=ROOT,
+                           input="\0".join(out), capture_output=True, text=True)
+        ignored = [s for s in p.stdout.split("\0") if s]
         for rel in ignored:
             out.pop(rel, None)
     return out
